@@ -2,6 +2,7 @@ from enum import Enum
 import sys
 import os
 
+saved_ast = None
 class TokenKind(Enum):
     OpenParen = 1
     CloseParen = 2
@@ -259,6 +260,7 @@ class Iterator:
         members = []
         for m in l[2][1]:
             if m[0] == ASTKind.List or m[0] == ASTKind.Vector:
+                # (V8BF ("TARGET_BF16_SIMD")
                 members.append((m[1][0][1], strip(m[1][1])))
             else:
                 members.append((m[1], ""))
@@ -274,20 +276,19 @@ class IteratorAttribute:
     def __init__(self, ast):
         l = ast[1]
         self.name = l[1][1]
-        members = []
+        mapping = {}
         for m in l[2][1]:
-            if m[0] == ASTKind.List or m[0] == ASTKind.Vector:
-                # (V8BF ("TARGET_BF16_SIMD")
-                members.append((m[1][0][1], m[1][1][1]))
+            if m[0] == ASTKind.List:
+                mapping[m[1][0][1]] = m[1][1][1]
             else:
-                members.append((m[1], ""))
-        self.members = members
+                mapping[m[1]] = ""
+        self.mapping = mapping 
 
     def __str__(self):
         return self.__repr__()
 
     def __repr__(self):
-        return '{{name: {}, members: {}}}'.format(self.name, self.members)
+        return '{{name: {}, mapping: {}}}'.format(self.name, self.mapping)
 
 class Elaborator():
     def __init__(self, working_dir):
@@ -303,7 +304,7 @@ class Elaborator():
         self.all_code_itors = {}
         self.all_code_attrs = {}
 
-    def dump_all_itors(self, os=sys.stderr):
+    def dump_all_itors(self, os=sys.stdout):
         print('all_mode_itors: {}'.format(self.all_mode_itors), file=os)
         print('all_mode_attrs: {}'.format(self.all_mode_attrs), file=os)
         print('all_code_itors: {}'.format(self.all_code_itors), file=os)
@@ -315,35 +316,20 @@ class Elaborator():
         return (ASTKind.Bad, (message, ast))
 
     @staticmethod
-    def split_identifier(id:str):
-        ids = []
-        id_len = len(id)
-        start = 0
-        end = 0
-        nested = 0
-        for end in range(id_len):
-            c = id[end]
-            if c == '<':
-                nested += 1
-            elif c == '>':
-                nested -= 1
-            elif c == ':':
-                if nested == 0:
-                    ids.append(id[start:end])
-                    start = end + 1
-        if start != id_len:
-            ids.append(id[start:id_len])
-        l = len(ids)
-        if l > 2:
-            print(l, id, ids, file=sys.stderr)
-            raise ValueError()
-        elif l == 2:
-            return (ids[0], ids[1])
+    def split_identifier_for_mode(name:str):
+        name_len = len(name)
+        colon_pos = name_len - 1
+        while colon_pos >= 0:
+            if name[colon_pos] == ':':
+                break
+            colon_pos -= 1
+        if colon_pos >= 0:
+            return (name[:colon_pos], name[colon_pos+1:])
         else:
-            return (id, None)
+            return (name, None)
 
     @staticmethod
-    def split_identifier_for_substitute(name:str):
+    def split_string_for_substitute(name:str):
         ids = []
         id_len = len(name)
         start = 0
@@ -361,47 +347,83 @@ class Elaborator():
                 if nested == 0:
                     ids.append(name[start:end + 1])
                     start = end + 1
-            elif c == ':':
-                if nested == 0:
-                    if start != end:
-                        ids.append(name[start:end])
-                    ids.append(':')
-                    start = end + 1
         if start != id_len:
             ids.append(name[start:id_len])
         return ids
 
-    def try_find_mode_itor(self, mode):
+    def find_mode_itors(self, mode):
         itor = self.all_mode_itors.get(mode, None)
         if itor == None:
             return
         self.mode_itor[itor] = 0
 
-    def try_find_int_itor(self, i):
+    # fixme: currently not support find_int_itors
+    def find_int_itors(self, i):
         itor = self.all_int_itors.get(i, None)
         if itor == None:
             return
         self.int_itor[itor] = 0
-            
-    def try_find_code_itor(self, code):
+
+    def find_code_itors(self, code):
         itor = self.all_code_itors.get(code, None)
         if itor == None:
             return
         self.code_itor[itor] = 0
 
+    # fixme: maybe delete this?
+    def find_attr_itors_impl(self, itor, attr, all_itor):
+        i = all_itor.get(attr, None)
+        if i == None:
+            return
+        itor[i] = 0
+
+    # fixme: maybe delete this?
+    def find_attr_itors(self, attr):
+        self.find_attr_itors_impl(self.mode_itor, attr, self.all_mode_itors)
+        self.find_attr_itors_impl(self.code_itor, attr, self.all_code_itors)
+        self.find_attr_itors_impl(self.int_itor, attr, self.all_int_itors)
+        attr_len = len(attr)
+        if attr_len < 2 or attr[0] != '<' or attr[-1] != '>':
+            return
+        colon_pos = None
+        pos = 1
+        while pos + 1 < attr_len:
+            c = attr[pos]
+            if c == ':':
+                if colon_pos == None:
+                    colon_pos = pos
+                    pos += 1
+                    continue
+                else:
+                    return
+            if not (c.isidentifier() or c == '_' or c.isdigit()):
+                return
+            pos += 1
+        if colon_pos:
+            prefix = attr[1:colon_pos]
+        else:
+            prefix = attr[1:-1]
+        self.find_attr_itors_impl(self.mode_itor, prefix, self.all_mode_itors)
+        self.find_attr_itors_impl(self.code_itor, prefix, self.all_code_itors)
+        self.find_attr_itors_impl(self.int_itor, prefix, self.all_int_itors)
+
     def find_itors(self, ast):
         k = ast[0]
         if k == ASTKind.Number:
             return
-        if k == ASTKind.Identifier or k == ASTKind.String:
-            idn, mode = Elaborator.split_identifier(ast[1])
+        if k == ASTKind.String:
+            ids = Elaborator.split_string_for_substitute(ast[1])
+            for name in ids:
+                self.find_attr_itors(name)
+        elif k == ASTKind.Identifier:
+            prefix, mode = Elaborator.split_identifier_for_mode(ast[1])
             if mode != None:
-                self.try_find_mode_itor(mode)
-            else:
-                self.try_find_int_itor(idn)
-            self.try_find_code_itor(idn)
-
-        if k == ASTKind.List or k == ASTKind.Vector:
+                self.find_mode_itors(mode)
+            self.find_code_itors(prefix)
+            ids = Elaborator.split_string_for_substitute(prefix)
+            for name in ids:
+                self.find_attr_itors(name)
+        elif k == ASTKind.List or k == ASTKind.Vector:
             for m in ast[1]:
                 self.find_itors(m)
 
@@ -445,9 +467,9 @@ class Elaborator():
             if handler != None:
                 ast_ = handler(ast_)
                 if isinstance(ast_, list):
-                    asts = ast_
+                    return ast_
                 else:
-                    asts = [ast_]
+                    return [ast_]
         def bump(d):
             for k in d:
                 if d[k] + 1 < len(k.members):
@@ -458,6 +480,8 @@ class Elaborator():
             return False
         result = []
         for ast in asts:
+            global saved_ast
+            saved_ast = ast
             self.elab_init()
             self.find_itors(ast)
             while True:
@@ -468,48 +492,121 @@ class Elaborator():
                     break;
         return result
 
-    def try_substitute_mode(self, s):
-        print('to_substitute: ', s)
-        if len(s) < 2 or s[0] != '<' or s[-1] != '>':
-            return s
-        s1 = s[1:-1]
-        print('to_substitute s1: ', s1)
-        print(self.mode_itor)
-        for k in self.mode_itor:
-            print(k.name, s1)
-            if k.name == s1:
-                print('substitute: ', k.members[self.mode_itor[k]][0])
-                return k.members[self.mode_itor[k]][0]
-        return s
+    def try_substitute_mode(self, name):
+        name_len = len(name)
+        if name_len > 2 and name[0] == '<' and name[-1] == '>':
+            return self.try_substitute_attr(name)
+        else:
+            m_itor = self.all_mode_itors.get(name, None)
+            if m_itor != None:
+                return m_itor.members[self.mode_itor[m_itor]][0]
+            else:
+                return name
 
-    def try_substitute_code(self, s):
-        if len(s) < 2 or s[1] != '<' or s[-1] != '>':
-            return s
-        s1 = s[1:-1]
-        for k in self.code_itor:
-            if k.name == s1:
-                return k.members[self.code_itor[k]][0]
-        return s
+    def try_substitute_code(self, name):
+        name_len = len(name)
+        if name_len > 2 and name[0] == '<' and name[-1] == '>':
+            return self.try_substitute_attr(name)
+        else:
+            c_itor = self.all_code_itors.get(name, None)
+            if c_itor != None:
+                return c_itor.members[self.code_itor[c_itor]][0]
+            else:
+                return name
+
+    def try_substitute_attr_impl(self, itor, attr_):
+        # fixme: mode, MODE
+        # fixme: remove return None
+        if attr_ == 'mode':
+            return '<{}:{}>'.format(itor, attr_)
+        if attr_ == 'MODE':
+            return '<{}:{}>'.format(itor, attr_)
+        if itor == None:
+            if attr := self.all_mode_attrs.get(attr_, None):
+                print('mode attr: ', attr)
+                print('mode itor: ', self.mode_itor)
+                for m in self.mode_itor:
+                    if (v := attr.mapping.get(m.members[self.mode_itor[m]][0], None)) != None:
+                        return v
+            if attr := self.all_code_attrs.get(attr_, None):
+                print('CODE ATTR: ', attr)
+                for c in self.code_itor:
+                    if (v := attr.mapping.get(c.members[self.code_itor[c]][0], None)) != None:
+                        return v
+            if attr := self.all_int_attrs.get(attr_, None):
+                print('int attr: ', attr)
+                print('int itor: ', self.int_itor)
+                for i in self.int_itor:
+                    if (v := attr.mapping.get(i.members[self.int_itor[i]][0], None)) != None:
+                        return v
+            print('ast: ', saved_ast)
+            #raise ValueError()
+            return None
+        else:
+            kv = None
+            if k := self.all_mode_itors.get(itor, None):
+                kv = k.members[self.mode_itor[k]][0]
+                attr = self.all_mode_attrs.get(attr_, None)
+            elif k := self.all_code_itors.get(itor, None):
+                kv = k.members[self.code_itor[k]][0]
+                attr = self.all_code_attrs.get(attr_, None)
+            elif k := self.all_int_itors.get(itor, None):
+                kv = k.members[self.int_itor[k]][0]
+                attr = self.all_int_attrs.get(attr_, None)
+            else:
+                return None
+            if attr == None:
+                return None
+            return attr.mapping[kv]
+
+    def try_substitute_attr(self, name):
+        name_len = len(name)
+        if name_len <= 2 or name[0] != '<' or name[-1] != '>':
+            return name
+        colon_pos = None
+        pos = 1
+        while pos + 1 < name_len:
+            c = name[pos]
+            if c == ':':
+                if colon_pos == None:
+                    colon_pos = pos
+                    pos += 1
+                    continue
+                else:
+                    return name
+            if not (c.isidentifier() or c == '_' or c.isdigit()):
+                return name
+            pos += 1
+        if colon_pos == None:
+            print(name)
+            if v := self.try_substitute_attr_impl(None, name[1:-1]):
+                return v
+        else:
+            if v := self.try_substitute_attr_impl(name[1:colon_pos], name[colon_pos + 1:-1]):
+                return v
+        return name
 
     def substitute_string_impl(self, name):
-        ids = Elaborator.split_identifier_for_substitute(name)
-        has_mode = len(ids) >= 2 and ids[-2] == ':'
-        if has_mode:
-            ids[-1] = self.try_substitute_mode(ids[-1])
-        for i in range(len(ids)):
-            ids[i] = self.try_substitute_mode(self.try_substitute_code(ids[i]))
-        return ids
+        ids = Elaborator.split_string_for_substitute(name)
+        return "".join([self.try_substitute_attr(x) for x in ids])
 
     def substitute_identifier(self, ast):
         assert(ast[0] == ASTKind.Identifier)
-        return (ASTKind.Identifier, "".join(self.substitute_string_impl(ast[1])))
+        prefix, mode = Elaborator.split_identifier_for_mode(ast[1])
+        result = self.try_substitute_code(prefix)
+        if result == prefix:
+            result = self.substitute_string_impl(prefix)
+        if mode != None:
+            return (ASTKind.Identifier, result + ':' + self.try_substitute_mode(mode))
+        else:
+            return (ASTKind.Identifier, result)
 
     def substitute_number(self, ast):
         return ast
 
     def substitute_string(self, ast):
         assert(ast[0] == ASTKind.String)
-        return (ASTKind.String, "".join(self.substitute_string_impl(ast[1])))
+        return (ASTKind.String, self.substitute_string_impl(ast[1]))
 
     def substitute_vector(self, ast):
         assert(ast[0] == ASTKind.Vector)
@@ -671,8 +768,6 @@ def dump_ast(ast, indent = 0, os = sys.stdout):
         ASTKind.List: dump_ast_list,
         ASTKind.Vector: dump_ast_vector,
     }
-    if isinstance(ast, ASTKind):
-        print(ast, file=sys.stderr)
     switcher[ast[0]](ast, indent, os)
 
 if __name__ == '__main__':
