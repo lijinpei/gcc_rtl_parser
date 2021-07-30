@@ -523,23 +523,23 @@ class Elaborator():
             return '<{}:{}>'.format(itor, attr_)
         if itor == None:
             if attr := self.all_mode_attrs.get(attr_, None):
-                print('mode attr: ', attr)
-                print('mode itor: ', self.mode_itor)
+                # print('mode attr: ', attr)
+                # print('mode itor: ', self.mode_itor)
                 for m in self.mode_itor:
                     if (v := attr.mapping.get(m.members[self.mode_itor[m]][0], None)) != None:
                         return v
             if attr := self.all_code_attrs.get(attr_, None):
-                print('CODE ATTR: ', attr)
+                # print('CODE ATTR: ', attr)
                 for c in self.code_itor:
                     if (v := attr.mapping.get(c.members[self.code_itor[c]][0], None)) != None:
                         return v
             if attr := self.all_int_attrs.get(attr_, None):
-                print('int attr: ', attr)
-                print('int itor: ', self.int_itor)
+                # print('int attr: ', attr)
+                # print('int itor: ', self.int_itor)
                 for i in self.int_itor:
                     if (v := attr.mapping.get(i.members[self.int_itor[i]][0], None)) != None:
                         return v
-            print('ast: ', saved_ast)
+            # print('ast: ', saved_ast)
             #raise ValueError()
             return None
         else:
@@ -578,7 +578,7 @@ class Elaborator():
                 return name
             pos += 1
         if colon_pos == None:
-            print(name)
+            # print(name)
             if v := self.try_substitute_attr_impl(None, name[1:-1]):
                 return v
         else:
@@ -791,4 +791,4 @@ if __name__ == '__main__':
         handler = switcher.get(h, None)
         if handler != None:
             handler(t)
-    elaborator.dump_all_itors(os=sys.stdout)
+    #elaborator.dump_all_itors(os=sys.stdout)
