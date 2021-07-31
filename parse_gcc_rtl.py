@@ -515,12 +515,22 @@ class Elaborator():
                 return name
 
     def try_substitute_attr_impl(self, itor, attr_):
-        # fixme: mode, MODE
-        # fixme: remove return None
-        if attr_ == 'mode':
-            return '<{}:{}>'.format(itor, attr_)
-        if attr_ == 'MODE':
-            return '<{}:{}>'.format(itor, attr_)
+        if (attr_ == 'code' or attr_ == 'CODE') and itor == None:
+            assert(len(self.code_itor) == 1)
+            for k in self.code_itor:
+                kv = k.members[self.code_itor[k]][0]
+                if attr_ == 'code':
+                    return kv.lower()
+                else:
+                    return kv.upper()
+        if (attr_ == 'mode' or attr_ == 'MODE') and itor == None:
+            assert(len(self.mode_itor) == 1)
+            for k in self.mode_itor:
+                kv = k.members[self.mode_itor[k]][0]
+                if attr_ == 'mode':
+                    return kv.lower()
+                else:
+                    return kv.upper()
         if itor == None:
             if attr := self.all_mode_attrs.get(attr_, None):
                 # print('mode attr: ', attr)
@@ -579,10 +589,10 @@ class Elaborator():
             pos += 1
         if colon_pos == None:
             # print(name)
-            if v := self.try_substitute_attr_impl(None, name[1:-1]):
+            if (v := self.try_substitute_attr_impl(None, name[1:-1])) != None:
                 return v
         else:
-            if v := self.try_substitute_attr_impl(name[1:colon_pos], name[colon_pos + 1:-1]):
+            if (v := self.try_substitute_attr_impl(name[1:colon_pos], name[colon_pos + 1:-1])) != None:
                 return v
         return name
 
@@ -781,10 +791,12 @@ if __name__ == '__main__':
             result += t
         else:
             result.append(t)
-    #for t in result:
-    #    dump_ast(t)
+    for t in result:
+        dump_ast(t)
+    name_printer = lambda x: print(x[1][1][1])
     switcher = {
-        'define_insn': lambda x: print(x[1][1][1])
+        'define_insn': name_printer,
+        'define_expand': name_printer,
     }
     for t in result:
         h = Elaborator.get_list_form(t)
