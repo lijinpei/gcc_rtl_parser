@@ -67,9 +67,9 @@ def lex_Identifier(buffer:str, start:int):
     buffer_len = len(buffer)
     end = start
     # '<name>' is rtl's special syntax for iterator
-    while end < buffer_len and is_rtl_ident_char(buffer[end]):
+    while end < buffer_len and (is_rtl_ident_char(buffer[end]) or (end > 0 and buffer[end-1:end+1] == ': ')):
         end += 1
-    return (end, (TokenKind.Identifier, buffer[start:end]))
+    return (end, (TokenKind.Identifier, buffer[start:end].replace(' ', '')))
 
 def lex_HexNumber(buffer:str, start:int):
     buffer_len = len(buffer)
@@ -183,7 +183,7 @@ def get_lex_handler(buffer:str, start:int):
     end = start + 1
     buffer_len = len(buffer)
     while end < buffer_len:
-        if not is_rtl_ident_char(buffer[end]):
+        if not is_rtl_ident_char(buffer[end]) and not buffer[end - 1: end + 1] == ': ':
             break
         end += 1
     def valid_hex_number(buffer, start, end):
